@@ -46,12 +46,287 @@ export class ShapeDetector {
    */
   async detectShapes(imageData: ImageData): Promise<DetectionResult> {
     const startTime = performance.now();
+    const height = imageData.height;
+    const width = imageData.width;
+    //edge detection
+    //since the test images are simple black and white images
+    const binaryMap = new Uint8ClampedArray(width * height);
 
-    // TODO: Implement shape detection algorithm
+
+    for ( let i = 0; i < imageData.data.length; i +=4){
+
+      const r = imageData.data[i];
+
+      const threshold = 127;
+
+      const mapIndex = i / 4;
+
+
+      if (r < threshold){
+        binaryMap[mapIndex] = 0 ; //black
+      }
+      else {
+        binaryMap[mapIndex] = 1 ; //white
+      }
+      
+    }
+
+    //Contour tracing
+    //Moore-Neighbor + Flood-fill
+    type Pixel = { x: number; y: number };
+    const allContours: Pixel[][] = [];
+    
+    for (let y = 0; y < height; y++){
+      for (let x = 0; x < width; x++){
+        const index = y * width + x;
+
+        if (binaryMap[index]=== 0 ){
+
+          const startPixel = { x: x, y: y};
+          const newContour: Pixel[] = [];
+
+          let currentPixel = { x: startPixel.x, y: startPixel.y};
+          let pixelToCOmeFrom = { x: startPixel.x -1, y: startPixel.y};
+
+          newContour.push(startPixel);
+
+          do {
+            const neighbors = [
+              {x: currentPixel.x, y: currentPixel.y -1}, // 0 : N
+              {x: currentPixel.x+1, y: currentPixel.y -1}, // 1 : NE
+              {x: currentPixel.x+1, y: currentPixel.y }, // 2 : E
+              {x: currentPixel.x+1, y: currentPixel.y +1}, // 3 : SE
+              {x: currentPixel.x, y: currentPixel.y +1}, // 4 : S
+              {x: currentPixel.x-1, y: currentPixel.y +1}, // 5 : SW
+              {x: currentPixel.x-1, y: currentPixel.y }, // 6 : W
+              {x: currentPixel.x-1, y: currentPixel.y -1}, // 7 : NW
+            ];
+            const fromIndex = neighbors.findIndex(p => p.x === pixelToCOmeFrom.x && p.y === pixelToCOmeFrom.y);
+          let nextPixel = null;
+          let nextIndex = (fromIndex + 1)%8;
+
+          for (let i = 0 ; i < 8; i++){
+            const testPixel = neighbors[nextIndex];
+
+            if (binaryMap[testPixel.y * width + testPixel.x] === 0){
+              nextPixel = testPixel;
+              break;
+            }
+            nextIndex = (nextIndex + 1) % 8;
+          }
+
+          if (nextPixel){
+            pixelToCOmeFrom = currentPixel;
+
+            currentPixel = nextPixel;
+            if( currentPixel.x !== startPixel.x || currentPixel.y !== startPixel.y){
+
+              newContour.push(currentPixel);
+            }
+          }
+          else {
+
+            break;
+          }
+          }
+          while (currentPixel.x !== startPixel.x || currentPixel.y !== startPixel.y);
+
+          allContours.push(newContour);
+
+          //flood-fill 
+
+          const queue: Pixel[] = [startPixel];
+
+          binaryMap[index] = 1;
+
+          while (queue.length > 0){
+            const pixel = queue.shift()!;
+
+            const neighbors = [
+              {x: pixel.x, y: pixel.y -1}, //N
+              {x: pixel.x + 1, y: pixel.y }, //E
+              {x: pixel.x, y: pixel.y +1}, //S
+              {x: pixel.x-1, y: pixel.y }, //W
+
+            ];
+
+            for (const n of neighbors){
+              const nIndex = n.y * width + n.x;
+
+              if (n.x >= 0 && n.x < width &&
+                  n.y >= 0 && n.y < height &&
+                  binaryMap[nIndex]===0){
+                    binaryMap[nIndex] = 1;
+                    queue.push(n);
+
+                  }
+
+              }
+          }
+        }
+
+    }
+
+
+
+
+
+
     const shapes: DetectedShape[] = [];
 
-    // Placeholder implementation
-    console.log("Shape detection not implemented yet");
+    for (const contour of allContours){
+      const epsilon = 0.7;
+      const simplifiedConstour: Pixel[] = ramerDouglasPeucker(contour, epsilon);
+
+      const vertices = simplifiedConstour.length;
+      let type: DetectedShape["type"] | null = null;
+
+      if (vertices === 3){
+        type = 'triangle';
+      }
+      else if (vertices === 4){
+        type = 'rectangle';
+      }
+      else if (vertices === 5){
+        type = 'pentagon';
+      }
+      else if (vertices === 10){
+        type = 'star';
+      }
+      else if (vertices > 10){
+        type = 'circle';
+      }
+
+      if (type){
+        
+        const { area, boundingBox, center} = calculateShapeProperties(contour);
+
+        shapes.push({
+          type: type,
+          confidence: 1.0,
+          boundingBox: boundingBox,
+          center: center,
+          area: area
+        });
+      }
+
+      function perpendicularDistance(p: Pixel, l1: Pixel, l2: Pixel): number {
+        const { x, y} = p;
+        const { x: x1, y: y1} = l1;
+        const { x: x2, y: y2} = l2;
+
+        const A = x - x1;
+        const B = y - y1;
+        const C = x2 - x1;
+        const D = y2 - y1;
+
+        const dot = A * C + B * D;
+        const lenSq = C * C + D * D;
+        // Handle degenerate segment (l1 == l2): distance from p to that point
+        if (lenSq === 0) {
+          return Math.sqrt((x - x1) * (x - x1) + (y - y1) * (y - y1));
+        }
+        let param = -1;
+        if (lenSq !== 0){
+          param = dot / lenSq;
+
+        let xx, yy;
+
+        if (param < 0){
+          xx = x1;
+          yy = y1;
+        }
+        else if (param > 1){
+          xx = x2;
+          yy = y2;
+        }
+        else {
+          xx = x1 + param * C;
+          yy = y1 + param * D;
+        }
+
+        const dx = x - xx;
+        const dy = y - yy;
+        return Math.sqrt(dx * dx + dy * dy);
+      }
+      function ramerDouglasPeucker(points: Pixel[], epsilon: number): Pixel[]{
+        if (points.length < 3)return points;
+
+        let maxDistance = 0;
+        let farthestIndex = 0;
+        const start = points[0];
+        const end = points[points.length -1];
+
+        for (let i =1; i < points.length -1; i++){
+          const distance = perpendicularDistance(points[i], start, end);
+          if (distance > maxDistance){
+            maxDistance = distance;
+            farthestIndex = i;
+          }
+        }
+
+        if (maxDistance > epsilon){
+
+          const leftResults = ramerDouglasPeucker(points.slice(0, farthestIndex +1), epsilon);
+
+          const rightResults = ramerDouglasPeucker(points.slice(farthestIndex), epsilon);
+
+          return leftResults.slice(0, -1).concat(rightResults);
+        }
+        else{
+          return [start, end];
+        }
+        if (points.length >0)return [points[0]];
+        return [];
+      }
+
+      function calculateShapeProperties(contour: Pixel[]):{
+        area: number,
+        boundingBox:{ x: number; y: number; width: number; height: number },
+        center: Pixel 
+      }{
+        if (contour.length === 0){
+          return {
+            area: 0,
+            boundingBox: { x: 0, y: 0, width: 0, height: 0 },
+            center: { x: 0, y: 0 }
+          };
+        }
+
+        let minX = Infinity;
+        let minY = Infinity;
+        let maxX = -Infinity;
+        let maxY = -Infinity;
+
+        for (const p of contour){
+          minX = Math.min(minX, p.x);
+          minY = Math.min(minY, p.y);
+          maxX = Math.max(maxX, p.x);
+          maxY = Math.max(maxY, p.y);
+        } 
+
+        const boundingBox = {
+          x: minX,
+          y: minY,
+          width: maxX - minX + 1,
+          height: maxY - minY + 1,
+        };
+
+        const center = {
+          x: minX + boundingBox.width / 2,
+          y: minY + boundingBox.height / 2,
+        };
+
+        const area = contour.length;
+
+        return { area, boundingBox, center };
+
+      }
+    }
+  }
+    }
+
+  // Placeholder implementation
     console.log("Image dimensions:", imageData.width, "x", imageData.height);
 
     const processingTime = performance.now() - startTime;
@@ -257,3 +532,4 @@ class ShapeDetectionApp {
 document.addEventListener("DOMContentLoaded", () => {
   new ShapeDetectionApp();
 });
+

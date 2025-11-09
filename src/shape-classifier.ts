@@ -12,12 +12,7 @@ export function classifyShape(
 ): DetectedShape["type"] | null {
   // Classify based on vertex count and geometric properties
   
-  // First check circularity for circles (high priority)
-  if (circularity > 0.75) {
-    return "circle";
-  }
-  
-  // Then check specific vertex counts
+  // Check specific vertex counts first (most reliable for polygons)
   if (vertices === 3) {
     return "triangle";
   } else if (vertices === 4) {
@@ -26,20 +21,28 @@ export function classifyShape(
     return "pentagon";
   } else if (vertices >= 10 && vertices <= 12) {
     // Stars typically have 10-12 vertices after simplification
-    // But only if circularity is low (already checked above)
-    return "star";
-  } else if (vertices > 12 || vertices >= 8) {
-    // Very high vertex count indicates a circle
-    return "circle";
+    // Check circularity to distinguish from circles
+    if (circularity < 0.7) {
+      return "star";
+    } else {
+      return "circle"; // High circularity with many vertices = circle
+    }
   } else if (vertices >= 6 && vertices <= 9) {
     // Could be pentagon, star, or circle - use circularity
-    if (circularity > 0.65) {
+    if (circularity > 0.75) {
       return "circle";
     } else if (vertices <= 7) {
       return "pentagon";
     } else {
       return "star";
     }
+  } else if (vertices > 12) {
+    // Very high vertex count indicates a circle
+    return "circle";
+  } else if (circularity > 0.8) {
+    // Fallback: very high circularity = circle
+    return "circle";
   }
+  
   return null;
 }

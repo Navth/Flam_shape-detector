@@ -86,7 +86,14 @@ export function calculateShapeProperties(contour: Point[]): {
     y: minY + boundingBox.height / 2,
   };
 
-  const area = contour.length;
+  // Calculate actual geometric area using Shoelace formula (also known as surveyor's formula)
+  let area = 0;
+  for (let i = 0; i < contour.length; i++) {
+    const j = (i + 1) % contour.length;
+    area += contour[i].x * contour[j].y;
+    area -= contour[j].x * contour[i].y;
+  }
+  area = Math.abs(area) / 2;
 
   return { area, boundingBox, center };
 }

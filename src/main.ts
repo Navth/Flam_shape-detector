@@ -4,6 +4,7 @@ import { EvaluationManager } from "./evaluation-manager.js";
 import { ramerDouglasPeucker } from "./contour-simplification.js";
 import { calculateShapeProperties } from "./geometry-utils.js";
 import { classifyShape } from "./shape-classifier.js";
+import { calculateConfidence } from "./confidence-calculator.js";
 
 export interface Point {
   x: number;
@@ -205,9 +206,18 @@ export class ShapeDetector {
       const type = classifyShape(vertices, circularity);
 
       if (type) {
+        // Calculate confidence score based on multiple factors
+        const confidence = calculateConfidence(
+          type,
+          vertices,
+          circularity,
+          perimeter,
+          boundingBox
+        );
+
         shapes.push({
           type,
-          confidence: 1.0,
+          confidence,
           boundingBox,
           center,
           area,
